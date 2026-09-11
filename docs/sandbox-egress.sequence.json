@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Sandbox Network Egress",
+    "output": "sandbox-egress.html",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "allowed-request", "label": "Allowed request", "focus": ["goose", "proxy", "opa", "litellm", "model"], "note": "An inference request matching the network policy flows through the CONNECT proxy to the model provider." },
+      { "id": "blocked-request", "label": "Blocked request", "focus": ["goose", "proxy", "opa"], "note": "A request to an undeclared endpoint is denied by OPA policy with 403 Forbidden." },
+      { "id": "host-resolution", "label": "Host resolution", "focus": ["goose", "proxy", "litellm"], "note": "host.containers.internal resolves to 169.254.1.2 inside the container, reaching the host network." }
+    ]
+  },
+  "participants": [
+    { "id": "goose", "type": "backend", "label": "Goose CLI", "sublabel": "agent namespace" },
+    { "id": "proxy", "type": "security", "label": "CONNECT Proxy", "sublabel": "veth0 10.200.0.1" },
+    { "id": "opa", "type": "security", "label": "OPA Engine", "sublabel": "Rego policy" },
+    { "id": "litellm", "type": "backend", "label": "LiteLLM", "sublabel": "host :4000" },
+    { "id": "model", "type": "external", "label": "LLM Provider", "sublabel": "upstream" }
+  ],
+  "segments": [
+    { "from": 150, "to": 345, "label": "Allowed inference request" },
+    { "from": 375, "to": 510, "label": "Blocked egress" }
+  ],
+  "messages": [
+    { "id": "connect-req", "from": "goose", "to": "proxy", "y": 180, "label": "CONNECT host.containers.internal:4000", "variant": "emphasis" },
+    { "id": "policy-check", "from": "proxy", "to": "opa", "y": 218, "label": "check binary + endpoint", "variant": "security" },
+    { "id": "policy-allow", "from": "opa", "to": "proxy", "y": 252, "label": "allow", "variant": "return" },
+    { "id": "forward-req", "from": "proxy", "to": "litellm", "y": 288, "label": "forward HTTPS", "variant": "emphasis" },
+    { "id": "litellm-call", "from": "litellm", "to": "model", "y": 318, "label": "API call", "variant": "default" },
+    { "id": "model-resp", "from": "model", "to": "litellm", "y": 348, "label": "completion", "variant": "return" },
+    { "id": "litellm-resp", "from": "litellm", "to": "proxy", "y": 378, "label": "response", "variant": "return" },
+    { "id": "proxy-resp", "from": "proxy", "to": "goose", "y": 408, "label": "tunnel response", "variant": "return" },
+    { "id": "blocked-connect", "from": "goose", "to": "proxy", "y": 455, "label": "CONNECT example.com:443", "variant": "dashed" },
+    { "id": "blocked-check", "from": "proxy", "to": "opa", "y": 490, "label": "check binary + endpoint", "variant": "security" },
+    { "id": "blocked-deny", "from": "opa", "to": "proxy", "y": 522, "label": "deny", "variant": "security" },
+    { "id": "blocked-resp", "from": "proxy", "to": "goose", "y": 554, "label": "403 Forbidden", "variant": "security" }
+  ],
+  "activations": [
+    { "participant": "goose", "from": 172, "to": 416, "type": "backend" },
+    { "participant": "proxy", "from": 180, "to": 414, "type": "security" },
+    { "participant": "opa", "from": 213, "to": 258, "type": "security" },
+    { "participant": "litellm", "from": 283, "to": 386, "type": "backend" },
+    { "participant": "model", "from": 313, "to": 354, "type": "external" },
+    { "participant": "goose", "from": 447, "to": 562, "type": "backend" },
+    { "participant": "proxy", "from": 455, "to": 560, "type": "security" },
+    { "participant": "opa", "from": 485, "to": 528, "type": "security" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Allowed Path", "items": ["Binary identity verified via /proc/{pid}/exe", "Endpoint matches network_policies declaration", "Tunnel established through CONNECT proxy"] },
+    { "dot": "rose", "title": "Blocked Path", "items": ["Undeclared endpoint rejected by OPA", "403 returned to agent — no silent drop", "Binary identity still checked (defense in depth)"] },
+    { "dot": "cyan", "title": "Host Resolution", "items": ["host.containers.internal → 169.254.1.2 in container", "Proxy resolves from container namespace", "SSRF protection exempts exact hostname"] }
+  ]
+}

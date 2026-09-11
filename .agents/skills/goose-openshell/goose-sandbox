@@ -1,0 +1,344 @@
+#!/usr/bin/env bash
+# goose-sandbox (@gs) — Sandboxed Goose CLI wrapper
+#
+# Manages OpenShell sandbox lifecycle transparently while mirroring
+# goose CLI options. Bind-mounts goose binary, config, and agentfs
+# from the host into the sandbox.
+#
+# Usage:
+#   goose-sandbox run [goose-options]       # One-shot prompt
+#   goose-sandbox session [goose-options]    # Interactive session
+#   goose-sandbox session resume [name]     # Resume existing session
+#   goose-sandbox list                      # List sandboxes
+#   goose-sandbox delete <name>             # Delete a sandbox
+#   goose-sandbox status                    # Show sandbox status
+#
+# Alias: @gs (add to ~/.bashrc: alias @gs='goose-sandbox')
+
+set -euo pipefail
+
+# === Configuration ===
+GOOSE_BIN="${GOOSE_BIN:-$HOME/.local/bin/goose}"
+GOOSE_CONFIG="${GOOSE_CONFIG:-$HOME/.config/goose}"
+AGENTFS_DIR="${AGENTFS_DIR:-$HOME/.agents}"
+SHIM_IMAGE="${SHIM_IMAGE:-localhost/goose-shim:latest}"
+POLICY_FILE="${POLICY_FILE:-$HOME/.config/openshell/goose-policy.yaml}"
+PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
+
+# === Version ===
+GOOSE_SANDBOX_VERSION="1.0.1"
+
+# === Helpers ===
+info()  { echo "🔲 $*"; }
+ok()    { echo "✅ $*"; }
+err()   { echo "❌ $*" >&2; }
+warn()  { echo "⚠️  $*" >&2; }
+
+usage() {
+  cat << 'EOF'
+Usage: goose-sandbox <command> [options]
+
+Commands:
+  run [goose-options]          Run goose with a one-shot prompt in sandbox
+  session [goose-options]      Start interactive goose session in sandbox
+  session resume [name]        Resume an existing session
+  list                         List sandboxes
+  delete <name>                Delete a sandbox
+  status                       Show sandbox status
+  help                         Show this help
+
+Environment:
+  GOOSE_BIN        Goose binary path    (default: ~/.local/bin/goose)
+  GOOSE_CONFIG     Goose config dir     (default: ~/.config/goose)
+  AGENTFS_DIR      Agentfs directory    (default: ~/.agents)
+  SHIM_IMAGE       Container image      (default: localhost/goose-shim:latest)
+  POLICY_FILE      Sandbox policy       (default: ~/.config/openshell/goose-policy.yaml)
+  PROJECT_DIR      Project directory    (default: current directory)
+
+Examples:
+  goose-sandbox run --text "What is 2+2?"
+  goose-sandbox session --name my-session
+  goose-sandbox session resume my-session
+  goose-sandbox delete my-session
+EOF
+  exit 0
+}
+
+# Build the driver-config-json for bind mounts
+build_driver_config() {
+  # Session DB and state live in /tmp inside sandbox — no host bind-mount
+  # SQLite WAL locking doesn't work reliably over Podman bind-mounts
+  cat << EOF
+{"podman":{"mounts":[
+  {"type":"bind","source":"${GOOSE_BIN}","target":"/usr/local/bin/goose","read_only":true,"selinux_label":"shared"},
+  {"type":"bind","source":"${GOOSE_CONFIG}","target":"/sandbox/.config/goose","read_only":true,"selinux_label":"shared"},
+  {"type":"bind","source":"${AGENTFS_DIR}","target":"/sandbox/.agents","read_only":true,"selinux_label":"shared"},
+  {"type":"bind","source":"${PROJECT_DIR}","target":"/sandbox/project","read_only":false,"selinux_label":"shared"}
+]}}
+EOF
+}
+
+# Prepare sandbox environment: copy config to writable location, set XDG vars
+sandbox_env_setup() {
+  cat << 'SETUP'
+export HOME=/sandbox
+# Config must be writable (permission.yaml.lock) — copy to /tmp
+mkdir -p /tmp/goose-config/goose/custom_providers
+cp /sandbox/.config/goose/config.yaml /tmp/goose-config/goose/
+cp /sandbox/.config/goose/.env /tmp/goose-config/goose/ 2>/dev/null || true
+cp /sandbox/.config/goose/custom_providers/*.json /tmp/goose-config/goose/custom_providers/ 2>/dev/null || true
+cp /sandbox/.config/goose/permission.yaml /tmp/goose-config/goose/ 2>/dev/null || true
+export XDG_CONFIG_HOME=/tmp/goose-config
+export XDG_DATA_HOME=/tmp/goose-data
+export XDG_STATE_HOME=/tmp/goose-state
+mkdir -p /tmp/goose-data/goose/sessions /tmp/goose-state/goose/logs
+SETUP
+}
+
+# Check if a sandbox exists and its phase
+sandbox_phase() {
+  local name="$1"
+  # Strip ANSI color codes before parsing
+  openshell sandbox list 2>/dev/null \
+    | sed 's/\x1b\[[0-9;]*m//g' \
+    | awk -v n="$name" '$1 == n { print $NF }'
+}
+
+# Create a new sandbox (long-running)
+create_sandbox() {
+  local name="$1"
+  local driver_config
+  driver_config="$(build_driver_config)"
+
+  info "Creating sandbox '$name'..."
+  openshell sandbox create \
+    --name "$name" \
+    --from "$SHIM_IMAGE" \
+    --policy "$POLICY_FILE" \
+    --driver-config-json "$driver_config" \
+    -- bash -c 'trap "exit 0" TERM; sleep 86400 & wait' >/tmp/goose-sandbox-create.log 2>&1 &
+
+  # Wait for Ready
+  local attempts=0
+  while [ $attempts -lt 30 ]; do
+    sleep 1
+    local phase
+    phase="$(sandbox_phase "$name")"
+    if [ "$phase" = "Ready" ]; then
+      ok "Sandbox '$name' is ready"
+      return 0
+    elif [ "$phase" = "Error" ]; then
+      err "Sandbox '$name' failed to start"
+      openshell logs "$name" 2>&1 | tail -5
+      return 1
+    fi
+    attempts=$((attempts + 1))
+  done
+  err "Sandbox '$name' timed out waiting for Ready"
+  return 1
+}
+
+# Ensure a sandbox is available (create or reuse)
+ensure_sandbox() {
+  local name="$1"
+  local phase
+  phase="$(sandbox_phase "$name")"
+
+  case "$phase" in
+    Ready)
+      ok "Reusing existing sandbox '$name'"
+      return 0
+      ;;
+    Running)
+      ok "Sandbox '$name' is running"
+      return 0
+      ;;
+    Stopped)
+      info "Starting stopped sandbox '$name'..."
+      openshell sandbox start "$name" 2>&1
+      sleep 3
+      ok "Sandbox '$name' restarted"
+      return 0
+      ;;
+    Error)
+      warn "Sandbox '$name' is in Error state — deleting and recreating"
+      openshell sandbox delete "$name" 2>/dev/null
+      sleep 2
+      create_sandbox "$name"
+      return $?
+      ;;
+    "")
+      create_sandbox "$name"
+      return $?
+      ;;
+    *)
+      warn "Sandbox '$name' in unexpected phase: $phase"
+      return 1
+      ;;
+  esac
+}
+
+# Generate a sandbox name from session name or auto-generate
+resolve_sandbox_name() {
+  local session_name="${1:-}"
+  if [ -n "$session_name" ]; then
+    # Sanitize: replace spaces/special chars with dashes
+    echo "$session_name" | tr ' /' '--' | tr -cd 'a-zA-Z0-9_-'
+  else
+    echo "gs-$(date +%Y%m%d-%H%M%S)"
+  fi
+}
+
+# === Commands ===
+
+cmd_run() {
+  local goose_args=("$@")
+  local session_name=""
+  local sandbox_name=""
+  local no_keep=false
+
+  # Parse for --name / -n to extract session name
+  local i=0
+  while [ $i -lt ${#goose_args[@]} ]; do
+    case "${goose_args[$i]}" in
+      --name|-n)
+        if [ $((i + 1)) -lt ${#goose_args[@]} ]; then
+          session_name="${goose_args[$((i + 1))]}"
+        fi
+        ;;
+    esac
+    i=$((i + 1))
+  done
+
+  sandbox_name="$(resolve_sandbox_name "$session_name")"
+
+  if [ -z "$session_name" ]; then
+    no_keep=true
+  fi
+
+  ensure_sandbox "$sandbox_name" || return 1
+
+  local env_setup
+  env_setup="$(sandbox_env_setup)"
+
+  # Build the full command with proper quoting
+  local goose_cmd="goose run"
+  for arg in "${goose_args[@]}"; do
+    goose_cmd+=" $(printf '%q' "$arg")"
+  done
+
+  openshell sandbox exec \
+    --name "$sandbox_name" \
+    --workdir /sandbox/project \
+    --no-tty \
+    -- bash -c "${env_setup}
+${goose_cmd}"
+
+  if [ "$no_keep" = true ]; then
+    openshell sandbox delete "$sandbox_name" >/dev/null 2>&1 &
+  fi
+}
+
+cmd_session() {
+  local goose_args=("$@")
+  local session_name=""
+  local resume=false
+
+  # Check for 'resume' subcommand
+  if [ "${1:-}" = "resume" ]; then
+    resume=true
+    shift
+    goose_args=("$@")
+    session_name="${1:-}"
+    if [ -z "$session_name" ]; then
+      err "Session name required for resume"
+      return 1
+    fi
+    shift
+    goose_args=("$@")
+  else
+    # Parse for --name / -n
+    local i=0
+    while [ $i -lt ${#goose_args[@]} ]; do
+      case "${goose_args[$i]}" in
+        --name|-n)
+          if [ $((i + 1)) -lt ${#goose_args[@]} ]; then
+            session_name="${goose_args[$((i + 1))]}"
+          fi
+          ;;
+      esac
+      i=$((i + 1))
+    done
+  fi
+
+  local sandbox_name
+  sandbox_name="$(resolve_sandbox_name "$session_name")"
+
+  ensure_sandbox "$sandbox_name" || return 1
+
+  local env_setup
+  env_setup="$(sandbox_env_setup)"
+
+  # Build the full command with proper quoting
+  local goose_cmd
+  if [ "$resume" = true ]; then
+    goose_cmd="goose session --resume --history --name $(printf '%q' "$session_name")"
+  else
+    goose_cmd="goose session"
+  fi
+  for arg in "${goose_args[@]}"; do
+    goose_cmd+=" $(printf '%q' "$arg")"
+  done
+
+  # Use --tty for interactive sessions to get proper terminal input
+  openshell sandbox exec \
+    --name "$sandbox_name" \
+    --workdir /sandbox/project \
+    --tty \
+    -- bash -c "${env_setup}
+${goose_cmd}"
+}
+
+cmd_list() {
+  openshell sandbox list 2>&1
+}
+
+cmd_delete() {
+  local name="${1:?Usage: goose-sandbox delete <name>}"
+  info "Deleting sandbox '$name' in background..."
+  openshell sandbox delete "$name" >/dev/null 2>&1 &
+  echo "🗑️  Delete submitted. Use 'goose-sandbox list' to confirm completion."
+}
+
+cmd_status() {
+  echo "=== Sandboxes ==="
+  openshell sandbox list 2>&1
+  echo ""
+  echo "=== Gateway ==="
+  openshell status 2>&1
+}
+
+# === Main ===
+main() {
+  if [ $# -eq 0 ]; then
+    usage
+  fi
+
+  local cmd="$1"
+  shift
+
+  case "$cmd" in
+    run)      cmd_run "$@" ;;
+    session)  cmd_session "$@" ;;
+    list)     cmd_list ;;
+    delete)   cmd_delete "$@" ;;
+    status)   cmd_status ;;
+    help|-h|--help) usage ;;
+    *)
+      err "Unknown command: $cmd"
+      usage
+      ;;
+  esac
+}
+
+main "$@"

@@ -1,0 +1,16 @@
+# Per-project session DB
+.goose/
+
+# Test artifacts
+.e2e-test
+
+# Archify intermediate artifacts
+docs/*.contact-sheet.html
+docs/*.sidecar.json
+docs/*.screenshots/
+
+# Editor
+*.swp
+*~
+.idea/
+.vscode/

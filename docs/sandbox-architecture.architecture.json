@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "AgentBox Sandbox Architecture",
+    "output": "sandbox-architecture.html",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "agent-path", "label": "Agent execution path", "focus": ["wrapper", "gateway", "supervisor", "agent", "goose"], "note": "Follow a goose-sandbox command from the host CLI through OpenShell to the confined agent process." },
+      { "id": "bind-mounts", "label": "Bind mount topology", "focus": ["goose-bin", "goose-config", "agentfs", "project", "goose"], "note": "Host artifacts bind-mounted into the sandbox — binary and config read-only, project read-write." },
+      { "id": "network-egress", "label": "Network egress", "focus": ["goose", "proxy", "opa", "litellm", "model"], "note": "Agent HTTP traffic flows through the CONNECT proxy and OPA policy engine before reaching the model provider." }
+    ]
+  },
+  "components": [
+    { "id": "wrapper", "type": "frontend", "label": "goose-sandbox", "sublabel": "@gs CLI", "pos": [40, 200], "size": [130, 56] },
+    { "id": "gateway", "type": "backend", "label": "OpenShell Gateway", "sublabel": "gRPC control plane", "pos": [240, 200], "size": [150, 56] },
+
+    { "id": "supervisor", "type": "security", "label": "Supervisor", "sublabel": "PID 1 · UID 0", "pos": [480, 100], "size": [140, 56], "tag": "Landlock + seccomp" },
+    { "id": "agent", "type": "backend", "label": "Agent Namespace", "sublabel": "veth1 10.200.0.2", "pos": [700, 200], "size": [140, 56], "tag": "UID 1000" },
+    { "id": "goose", "type": "backend", "label": "Goose CLI", "sublabel": "run / session", "pos": [920, 200], "size": [130, 56] },
+    { "id": "proxy", "type": "security", "label": "CONNECT Proxy", "sublabel": "veth0 10.200.0.1", "pos": [700, 370], "size": [140, 56] },
+    { "id": "opa", "type": "security", "label": "OPA Policy", "sublabel": "deny-by-default", "pos": [480, 370], "size": [140, 56] },
+
+    { "id": "goose-bin", "type": "external", "label": "Goose Binary", "sublabel": "~/.local/bin/goose", "pos": [920, 50], "size": [140, 48] },
+    { "id": "goose-config", "type": "external", "label": "Goose Config", "sublabel": "~/.config/goose", "pos": [1120, 200], "size": [140, 48] },
+    { "id": "agentfs", "type": "external", "label": "AgentFS", "sublabel": "~/.agents", "pos": [700, 50], "size": [140, 48] },
+    { "id": "project", "type": "external", "label": "Project Dir", "sublabel": "read-write", "pos": [1120, 320], "size": [140, 48] },
+
+    { "id": "litellm", "type": "cloud", "label": "LiteLLM Proxy", "sublabel": ":4000 on host", "pos": [240, 370], "size": [140, 56] },
+    { "id": "model", "type": "external", "label": "LLM Provider", "sublabel": "upstream API", "pos": [40, 370], "size": [130, 56] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Podman Container (bridge network)", "wraps": ["supervisor", "agent", "goose", "proxy", "opa"] },
+    { "kind": "security-group", "label": "Nested Network Namespace", "wraps": ["agent", "goose"] }
+  ],
+  "connections": [
+    { "id": "cli-to-gw", "from": "wrapper", "to": "gateway", "label": "gRPC/mTLS", "variant": "emphasis" },
+    { "id": "gw-to-sv", "from": "gateway", "to": "supervisor", "label": "create/exec" },
+    { "id": "sv-to-agent", "from": "supervisor", "to": "agent", "label": "spawn" },
+    { "id": "agent-to-goose", "from": "agent", "to": "goose", "label": "exec" },
+    { "id": "goose-to-proxy", "from": "goose", "to": "proxy", "label": "HTTP_PROXY", "variant": "dashed", "fromSide": "bottom", "toSide": "right" },
+    { "id": "proxy-to-opa", "from": "proxy", "to": "opa", "label": "policy check", "variant": "security" },
+    { "id": "opa-to-litellm", "from": "opa", "to": "litellm", "label": "allowed", "variant": "emphasis" },
+    { "id": "litellm-to-model", "from": "litellm", "to": "model", "label": "API call" },
+    { "id": "bind-bin", "from": "goose-bin", "to": "goose", "label": "bind-ro", "variant": "dashed", "fromSide": "bottom", "toSide": "top" },
+    { "id": "bind-agentfs", "from": "agentfs", "to": "agent", "label": "bind-ro", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "labelDy": 24 },
+    { "id": "bind-config", "from": "goose-config", "to": "goose", "label": "bind-ro", "variant": "dashed", "fromSide": "left", "toSide": "right" },
+    { "id": "bind-project", "from": "project", "to": "goose", "label": "bind-rw", "variant": "dashed", "fromSide": "left", "toSide": "right" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Isolation Layers", "items": ["Landlock LSM — irrevocable filesystem confinement", "OPA/Rego — deny-by-default network policy", "seccomp BPF — syscall filtering"] },
+    { "dot": "cyan", "title": "Bind Mounts", "items": ["Binary + config + AgentFS: read-only", "Project directory: read-write", "No image rebuild on Goose update"] },
+    { "dot": "emerald", "title": "Network Path", "items": ["Agent → CONNECT proxy → OPA → host endpoint", "host.containers.internal dual-resolution", "Only declared endpoints reachable"] }
+  ]
+}

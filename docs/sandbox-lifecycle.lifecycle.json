@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Sandbox Lifecycle",
+    "output": "sandbox-lifecycle.html",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "happy-path", "label": "Happy path", "focus": ["creating", "starting", "running", "idle", "deleted"], "note": "Normal sandbox lifecycle from creation through use to cleanup." },
+      { "id": "agent-ops", "label": "Agent operations", "focus": ["running", "executing", "interactive"], "note": "One-shot run and interactive session modes within a running sandbox." },
+      { "id": "error-recovery", "label": "Error recovery", "focus": ["creating", "errored", "deleted"], "note": "Errored sandboxes are deleted and recreated by the wrapper." }
+    ]
+  },
+  "lanes": [
+    { "id": "main", "label": "Sandbox phases" },
+    { "id": "agent", "label": "Agent operations" },
+    { "id": "terminal", "label": "Terminal states" }
+  ],
+  "states": [
+    { "id": "creating", "type": "start", "label": "Creating", "sublabel": "sandbox create", "lane": "main", "col": 0, "step": "01", "tag": "gs run" },
+    { "id": "starting", "type": "active", "label": "Starting", "sublabel": "supervisor init", "lane": "main", "col": 1, "step": "02", "tag": "auto" },
+    { "id": "running", "type": "active", "label": "Running", "sublabel": "ready for exec", "lane": "main", "col": 2, "step": "03", "tag": "ready" },
+    { "id": "idle", "type": "active", "label": "Idle", "sublabel": "named sandbox", "lane": "main", "col": 3, "step": "04", "tag": "reusable" },
+    { "id": "deleted", "type": "success", "label": "Deleted", "sublabel": "cleaned up", "lane": "main", "col": 4, "step": "05", "tag": "done" },
+    { "id": "executing", "type": "active", "label": "Executing", "sublabel": "goose run", "lane": "agent", "col": 1, "tag": "one-shot" },
+    { "id": "interactive", "type": "active", "label": "Interactive", "sublabel": "goose session", "lane": "agent", "col": 2, "tag": "PTY" },
+    { "id": "errored", "type": "failure", "label": "Errored", "sublabel": "startup failed", "lane": "terminal", "col": 0, "tag": "auto-delete" },
+    { "id": "timedout", "type": "failure", "label": "Timed Out", "sublabel": "~45s shutdown", "lane": "terminal", "col": 2, "tag": "background" }
+  ],
+  "transitions": [
+    { "id": "run-to-exec", "from": "running", "to": "executing", "variant": "default", "fromSide": "bottom", "toSide": "top", "route": "drop" },
+    { "id": "run-to-session", "from": "running", "to": "interactive", "variant": "default", "fromSide": "bottom", "toSide": "top", "route": "drop" },
+    { "id": "idle-to-run", "from": "idle", "to": "running", "variant": "emphasis", "fromSide": "left", "toSide": "right" },
+    { "id": "create-to-err", "from": "creating", "to": "errored", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "drop" },
+    { "id": "idle-to-del", "from": "idle", "to": "deleted" },
+    { "id": "err-to-del", "from": "errored", "to": "timedout", "variant": "security" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Lifecycle", "items": ["Create → Start → Run → Idle → Delete", "Named sandboxes persist in Idle state", "Ephemeral sandboxes auto-delete after run"] },
+    { "dot": "cyan", "title": "Agent Modes", "items": ["Executing: one-shot goose run, no PTY", "Interactive: goose session with PTY", "Resume reconnects to Idle sandbox"] },
+    { "dot": "rose", "title": "Recovery", "items": ["Errored sandboxes auto-deleted by wrapper", "Delete is backgrounded (~45s shutdown)", "gs list shows current state"] }
+  ]
+}

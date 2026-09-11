@@ -1,0 +1,45 @@
+# Fedora Goose Shim Image
+# Thin image with runtime dependencies only.
+# Goose binary, config, and agentfs are bind-mounted from host at runtime.
+#
+# Build:   podman build -t goose-shim -f Containerfile .
+# Requires: enable_bind_mounts = true in gateway.toml
+#           OPENSHELL_PODMAN_USERNS=keep-id:uid=1000,gid=1000 in gateway.env
+
+FROM registry.fedoraproject.org/fedora:44
+
+# Runtime dependencies for goose + developer extension + OpenShell supervisor
+RUN dnf install -y --setopt=install_weak_deps=False \
+        bash \
+        git \
+        ripgrep \
+        curl \
+        python3 \
+        nodejs \
+        npm \
+        iproute \
+        nftables \
+        procps-ng \
+        findutils \
+        sed \
+        gawk \
+        diffutils \
+        libstdc++ \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+# Install uv (Python package manager — needed by goose python tool use)
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+
+# Create sandbox user and workspace directory (OpenShell Podman driver workspace root)
+RUN useradd -u 1000 -m -d /sandbox -s /bin/bash sandbox \
+    && chmod 755 /sandbox
+
+# Goose binary bind-mounted at runtime to /usr/local/bin/goose
+# Config bind-mounted at runtime to /sandbox/.config/goose
+# Agentfs bind-mounted at runtime to /sandbox/.agents
+
+WORKDIR /sandbox
+
+# No USER directive — policy sets process.run_as_user: "1000"
+# No ENTRYPOINT — OpenShell overrides with supervisor

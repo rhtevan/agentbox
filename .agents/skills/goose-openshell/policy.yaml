@@ -1,0 +1,52 @@
+version: 1
+
+process:
+  run_as_user: "1000"
+  run_as_group: "1000"
+
+filesystem_policy:
+  include_workdir: true
+  read_only:
+    - /usr
+    - /lib
+    - /lib64
+    - /proc
+    - /dev/urandom
+    - /etc
+    - /bin
+    - /sbin
+  read_write:
+    - /sandbox
+    - /tmp
+    - /dev/null
+
+landlock:
+  compatibility: best_effort
+
+network_policies:
+  litellm:
+    name: LiteLLM Proxy
+    endpoints:
+      - host: host.containers.internal
+        port: 4000
+    binaries:
+      - path: /usr/local/bin/goose
+      - path: /usr/bin/curl
+
+  skupper:
+    name: Skupper VAN
+    endpoints:
+      - host: host.containers.internal
+        port: 9000
+      - host: host.containers.internal
+        port: 10000
+    binaries:
+      - path: /usr/local/bin/goose
+
+  headroom:
+    name: Headroom Proxy
+    endpoints:
+      - host: host.containers.internal
+        port: 8787
+    binaries:
+      - path: /usr/local/bin/goose

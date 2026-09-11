@@ -1,0 +1,7 @@
+theme: jekyll-theme-cayman
+title: AgentBox
+description: Sandboxed AI agent runtime — run Goose CLI under NVIDIA OpenShell with network policy, filesystem isolation, and process governance
+exclude:
+  - .agents
+  - .goose
+  - AGENTS.md
