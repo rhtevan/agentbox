@@ -245,7 +245,7 @@ policy is applied at sandbox creation time.
 | [Requirements](docs/requirements.md) | Problem statement, goals, constraints |
 | [Design](docs/design.md) | Architecture decisions and trade-offs |
 | [Implementation](docs/implementation.md) | Config reference, skill stack, policy details |
-| [Test Report](docs/test-report.md) | UAT results, issues discovered, known limitations |
+| [Test Report](docs/test-report.md) | Test procedures (T1–T9, N1–N6), UAT results, known limitations |
 
 ### Interactive Diagrams
 
@@ -261,14 +261,17 @@ policy is applied at sandbox creation time.
 agentbox/
 ├── README.md                     ← This workshop guide
 ├── AGENTS.md                     ← AgentFS project entry point
+├── LICENSE                       ← Apache 2.0
+├── _config.yml                   ← GitHub Pages (Cayman theme)
 ├── docs/
 │   ├── requirements.md           ← Problem + goals
 │   ├── design.md                 ← Architecture decisions
 │   ├── implementation.md         ← Config + skill reference
-│   ├── test-report.md            ← Test results
+│   ├── test-report.md            ← Test procedures + results
 │   ├── sandbox-architecture.html ← Interactive architecture diagram
 │   ├── sandbox-lifecycle.html    ← Sandbox state machine diagram
 │   └── sandbox-egress.html       ← Network egress sequence diagram
+├── assets/css/style.scss         ← Theme override
 ├── .agents/
 │   ├── SOUL.md                   ← Agent identity
 │   ├── skills/
@@ -276,7 +279,6 @@ agentbox/
 │   │   └── goose-openshell/      ← Sandbox setup/wrapper
 │   ├── memories/                 ← Agent memories
 │   └── profiles/                 ← Agent profiles
-└── _config.yml                   ← GitHub Pages (Cayman theme)
 ```
 
 ## License

@@ -2,6 +2,10 @@
 
 <!-- Append-only. Newest entries at top. -->
 
+## 2026-09-11 10:35
+
+- README.md: surfaced Test Procedures in Documentation table, completed project structure tree (added LICENSE, _config.yml, assets/), removed duplicate _config.yml entry.
+
 ## 2026-09-11 10:26
 
 - Updated docs/test-report.md: added step-by-step test procedures for T1–T9 and N1–N6 with exact commands, expected output, and cleanup steps (286 lines added). Committed and pushed to rhtevan/agentbox.
