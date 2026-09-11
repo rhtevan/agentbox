@@ -41,6 +41,291 @@
 | T8 | Policy enforcement: network deny | ✅ | `curl https://example.com` → 403 |
 | T9 | Session resume: `goose-sandbox session resume uat-t9` | ✅ | Previous messages visible with `--history` |
 
+## Test Procedures
+
+### Prerequisites
+
+Before running tests, complete Labs 1–2 from the [README](../README.md)
+and verify the stack:
+
+```bash
+bash .agents/skills/goose-openshell/scripts/verify.sh
+# All S1–S10 must pass
+```
+
+### T1 — One-shot ephemeral run
+
+Run a single prompt in an ephemeral sandbox. The sandbox is created,
+used, and deleted automatically.
+
+```bash
+goose-sandbox run --text "What is 2+2?"
+```
+
+**Expected:**
+- Sandbox creates (you see `🔲 Creating sandbox...`)
+- Goose responds with an answer containing "4"
+- Sandbox is deleted after the run completes
+
+**Verify cleanup:**
+
+```bash
+goose-sandbox list
+# The ephemeral sandbox should not appear (or is deleting in background)
+```
+
+### T2 — Named run (persistent sandbox)
+
+Run a prompt in a named sandbox that persists after the run.
+
+```bash
+goose-sandbox run --name uat-t2 --text "Hello, who are you?"
+```
+
+**Expected:**
+- Sandbox `uat-t2` creates and remains after the run
+- Goose responds with a greeting
+
+**Verify persistence:**
+
+```bash
+goose-sandbox list
+# uat-t2 should appear with phase "Running"
+```
+
+### T3 — Named run reuse
+
+Send a follow-up prompt to the same named sandbox.
+
+```bash
+goose-sandbox run --name uat-t2 --text "What did I just ask you?"
+```
+
+**Expected:**
+- No new sandbox creation message (reuses `uat-t2`)
+- Goose responds (note: session DB is sandbox-local, so Goose
+  may not recall the previous prompt — this tests sandbox reuse,
+  not session continuity)
+
+### T4 — List sandboxes
+
+```bash
+goose-sandbox list
+```
+
+**Expected:**
+- Table output showing `uat-t2` with its phase
+- If other sandboxes exist from previous tests, they appear too
+
+### T5 — Delete sandbox
+
+```bash
+goose-sandbox delete uat-t2
+```
+
+**Expected:**
+- Returns immediately (delete is backgrounded)
+- Message indicates deletion is in progress
+
+**Verify:**
+
+```bash
+# Wait a few seconds, then:
+goose-sandbox list
+# uat-t2 should eventually disappear (~45s for full removal)
+```
+
+### T6 — Status
+
+```bash
+goose-sandbox status
+```
+
+**Expected:**
+- Gateway health check: reachable and authenticated
+- Sandbox list (may be empty after T5 cleanup)
+
+### T7 — Interactive session
+
+Start an interactive terminal session.
+
+```bash
+goose-sandbox session --name uat-t7
+```
+
+**Expected:**
+- Sandbox creates and terminal prompt appears
+- You can type prompts interactively
+- Agent responds to each prompt
+
+**Test interaction:**
+
+```
+> What is the capital of Japan?
+# Agent should respond with "Tokyo"
+```
+
+**Exit:** Press `Ctrl+C` to end the session.
+
+**Cleanup:**
+
+```bash
+goose-sandbox delete uat-t7
+```
+
+### T8 — Policy enforcement (network, filesystem, process)
+
+Create a sandbox and test each isolation layer.
+
+```bash
+goose-sandbox session --name uat-t8
+```
+
+**Network — blocked egress:**
+
+```
+> Run this command: curl -s -o /dev/null -w "%{http_code}" https://example.com
+```
+
+**Expected:** Agent reports `403` or a connection error (blocked by OPA).
+
+**Network — allowed egress:**
+
+```
+> Run this command: curl -s -o /dev/null -w "%{http_code}" http://host.containers.internal:4000/health
+```
+
+**Expected:** Agent reports `200` (allowed by network policy).
+
+**Filesystem — read-only enforcement:**
+
+```
+> Run this command: echo test > /etc/test-file
+```
+
+**Expected:** Agent reports `Permission denied` (Landlock read-only).
+
+**Filesystem — write to allowed path:**
+
+```
+> Run this command: echo test > /sandbox/project/test-file && echo success
+```
+
+**Expected:** Agent reports `success` (read-write path).
+
+**Process — non-root identity:**
+
+```
+> Run this command: id
+```
+
+**Expected:** Output shows `uid=1000(sandbox) gid=1000(sandbox)`.
+
+**Exit and cleanup:**
+
+```bash
+# Ctrl+C to exit, then:
+goose-sandbox delete uat-t8
+```
+
+### T9 — Session resume
+
+Create a session, exit, and resume it.
+
+**Step 1 — Create and interact:**
+
+```bash
+goose-sandbox session --name uat-t9
+```
+
+```
+> Remember the word "pineapple". Just confirm you noted it.
+# Agent confirms
+```
+
+Press `Ctrl+C` to exit.
+
+**Step 2 — Resume:**
+
+```bash
+goose-sandbox session resume uat-t9
+```
+
+**Expected:**
+- Previous conversation history is displayed (via `--history` flag)
+- You can continue the conversation
+
+```
+> What word did I ask you to remember?
+# Agent should recall "pineapple"
+```
+
+**Cleanup:**
+
+```bash
+goose-sandbox delete uat-t9
+```
+
+### N1 — Network: undeclared endpoint blocked
+
+```bash
+goose-sandbox run --name uat-n1 --text "Run: curl -s -o /dev/null -w '%{http_code}' https://example.com"
+```
+
+**Expected:** Output contains `403`.
+
+**Cleanup:** `goose-sandbox delete uat-n1`
+
+### N2 — Network: declared endpoint allowed
+
+```bash
+goose-sandbox run --name uat-n2 --text "Run: curl -s -o /dev/null -w '%{http_code}' http://host.containers.internal:4000/health"
+```
+
+**Expected:** Output contains `200`.
+
+**Cleanup:** `goose-sandbox delete uat-n2`
+
+### N3 — Filesystem: write to read-only path
+
+```bash
+goose-sandbox run --name uat-n3 --text "Run: echo test > /etc/test-file"
+```
+
+**Expected:** Output contains `Permission denied`.
+
+**Cleanup:** `goose-sandbox delete uat-n3`
+
+### N4 — Filesystem: write to allowed path
+
+```bash
+goose-sandbox run --name uat-n4 --text "Run: echo test > /sandbox/project/test-file && echo success"
+```
+
+**Expected:** Output contains `success`.
+
+**Cleanup:** `goose-sandbox delete uat-n4`
+
+### N5 — Filesystem: read outside allowed paths
+
+```bash
+goose-sandbox run --name uat-n5 --text "Run: cat /root/.ssh/id_rsa 2>&1"
+```
+
+**Expected:** Output contains `Permission denied` or `No such file or directory`.
+
+**Cleanup:** `goose-sandbox delete uat-n5`
+
+### N6 — Process: non-root identity
+
+```bash
+goose-sandbox run --name uat-n6 --text "Run: id -u"
+```
+
+**Expected:** Output contains `1000`.
+
+**Cleanup:** `goose-sandbox delete uat-n6`
+
 ## Issues Discovered During Testing
 
 | # | Symptom | Root Cause | Fix | Version |
