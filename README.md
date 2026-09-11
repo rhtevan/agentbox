@@ -2,10 +2,15 @@
 permalink: /
 ---
 
-# AgentBox
+# AgentBOX (agent-box)
 
 **Sandboxed AI agent runtime — run Goose CLI under NVIDIA OpenShell
 with network policy, filesystem isolation, and process governance.**
+
+Part of the **agent-x trilogy**:
+- **[AgentFS](https://github.com/rhtevan/agentfs)** (agent-filesystem) — foundation file structures for agents
+- **[AgentFLOW](https://github.com/rhtevan/agentflow)** (agent-flow) — deterministic workflow orchestration
+- **AgentBOX** (agent-box) — secure enterprise sandbox for agent sessions ← this project
 
 AgentBox wraps [Goose](https://github.com/block/goose) in an
 [NVIDIA OpenShell](https://developer.nvidia.com/openshell) sandbox so
