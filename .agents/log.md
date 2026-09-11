@@ -2,6 +2,10 @@
 
 <!-- Append-only. Newest entries at top. -->
 
+## 2026-09-11 10:26
+
+- Updated docs/test-report.md: added step-by-step test procedures for T1–T9 and N1–N6 with exact commands, expected output, and cleanup steps (286 lines added). Committed and pushed to rhtevan/agentbox.
+
 ## 2026-09-11 09:45
 
 - Wind-down documentation phase (D1–D5): created README.md (workshop-style, 6 labs), docs/requirements.md (goals G1–G7), docs/design.md (decisions D1–D8, security boundaries), docs/implementation.md (skill stack, policy, config reference), docs/test-report.md (S1–S10, T1–T9, 13 issues, negative tests). GitHub Pages scaffolding: _config.yml (Cayman theme), assets/css/style.scss, .gitignore updated. Archify diagrams: sandbox-architecture (architecture), sandbox-lifecycle (lifecycle), sandbox-egress (sequence) — all showcase-validated and delivered to docs/.
